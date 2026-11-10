@@ -1,0 +1,45 @@
+name: Comprobar utilidades Windows
+on:
+  push:
+    paths: ['utilidades/**', '.github/workflows/utilidades.yml']
+  pull_request:
+    paths: ['utilidades/**', '.github/workflows/utilidades.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Pruebas Python
+        run: python -m unittest discover -s utilidades/tests -v
+      - name: Validar sintaxis en Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem utilidades -Filter *.ps1 -Recurse | ForEach-Object {
+            $tokens = $null; $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+      - name: Probar resultados PowerShell sin cambiar preferencias
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString())
+          New-Item -ItemType Directory -Path $root | Out-Null
+          try {
+            & ./utilidades/crear-proyecto/script.ps1 -Destino "$root/proyecto"
+            if (-not (Test-Path "$root/proyecto/src")) { throw 'Falta src' }
+            & ./utilidades/paleta-diseno/script.ps1 -Destino "$root/paleta.svg" -Colores '#123456','#ABCDEF'
+            [xml]$svg = Get-Content "$root/paleta.svg" -Raw
+            if ($svg.svg.width -ne '320') { throw 'SVG incorrecto' }
+            Set-Content "$root/proyecto/a.txt" 'duplicado'
+            Set-Content "$root/proyecto/b.txt" 'duplicado'
+            $groups = & ./utilidades/buscar-duplicados/script.ps1 -Origen "$root/proyecto" | ConvertFrom-Json
+            if (@($groups).Count -ne 1 -or $groups.archivos.Count -ne 2) { throw 'Duplicados incorrectos' }
+            & ./utilidades/tema-windows/script.ps1 -Modo estado
+          } finally { Remove-Item -LiteralPath $root -Recurse -Force }
